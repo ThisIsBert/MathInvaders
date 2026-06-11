@@ -1,4 +1,4 @@
-const CACHE_NAME = "mathinvaders-v5";
+const CACHE_NAME = "mathinvaders-v6";
 const ASSETS = [
   "./",
   "./index.html",

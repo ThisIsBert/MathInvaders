@@ -30,6 +30,7 @@ const state = {
   explosions: [],
   stars: [],
   stationHits: [],
+  stationDamage: [],
   facts: [],
   audio: null,
 };
@@ -81,6 +82,7 @@ function resetGame() {
   state.shots = [];
   state.explosions = [];
   state.stationHits = [];
+  state.stationDamage = [];
   state.facts.forEach((fact) => {
     fact.misses = 0;
     fact.hits = 0;
@@ -132,6 +134,27 @@ function tone(frequency, duration, type = "square", gain = 0.045, delay = 0) {
   oscillator.stop(start + duration + 0.02);
 }
 
+function noise(duration, gain = 0.055, delay = 0) {
+  const audio = ensureAudio();
+  if (!audio) return;
+  if (audio.state === "suspended") audio.resume();
+  const sampleRate = audio.sampleRate;
+  const buffer = audio.createBuffer(1, Math.max(1, sampleRate * duration), sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  }
+  const source = audio.createBufferSource();
+  const envelope = audio.createGain();
+  const start = audio.currentTime + delay;
+  envelope.gain.setValueAtTime(gain, start);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  source.buffer = buffer;
+  source.connect(envelope);
+  envelope.connect(audio.destination);
+  source.start(start);
+}
+
 function sound(name) {
   if (name === "start") {
     tone(196, 0.08);
@@ -141,8 +164,10 @@ function sound(name) {
   if (name === "tap") tone(660, 0.035, "square", 0.025);
   if (name === "fire") tone(520, 0.055, "sawtooth", 0.04);
   if (name === "hit") {
-    tone(880, 0.055, "square", 0.05);
-    tone(1320, 0.08, "square", 0.04, 0.055);
+    noise(0.22, 0.08);
+    tone(96, 0.14, "sawtooth", 0.065);
+    tone(52, 0.2, "square", 0.04, 0.04);
+    tone(1180, 0.045, "square", 0.035, 0.02);
   }
   if (name === "miss") tone(170, 0.12, "sawtooth", 0.045);
   if (name === "damage") {
@@ -329,6 +354,7 @@ function destroyDrone(drone) {
   state.streak += 1;
   state.score += 100 + state.level * 12 + Math.max(0, Math.floor((canvas.clientHeight - drone.y) / 10));
   state.explosions.push({ x: drone.x, y: drone.y, size: drone.size, t: 0, life: 0.55, good: true });
+  if (state.streak % 10 === 0) repairStation();
   sound("hit");
 }
 
@@ -342,8 +368,44 @@ function damageStation(drone) {
   state.shield -= 4 * grace;
   state.streak = 0;
   state.stationHits.push({ x: drone.x, t: 0 });
+  addStationDamage(drone.x);
   state.explosions.push({ x: drone.x, y: canvas.clientHeight - stationHeight() + 20, size: drone.size * 1.25, t: 0, life: 0.7, good: false });
   sound("damage");
+}
+
+function addStationDamage(x) {
+  const segmentWidth = Math.max(42, canvas.clientWidth / 10);
+  const index = Math.max(0, Math.min(9, Math.floor(x / segmentWidth)));
+  const existing = state.stationDamage.find((damage) => damage.index === index);
+  if (existing) {
+    existing.level = Math.min(3, existing.level + 1);
+    existing.x = x;
+  } else {
+    state.stationDamage.push({ index, x, level: 1 });
+  }
+}
+
+function repairStation() {
+  state.shield = Math.min(100, state.shield + 14);
+  state.score += 250;
+  state.stationDamage
+    .sort((a, b) => b.level - a.level)
+    .slice(0, 3)
+    .forEach((damage) => {
+      damage.level -= 1;
+    });
+  state.stationDamage = state.stationDamage.filter((damage) => damage.level > 0);
+  state.explosions.push({
+    x: canvas.clientWidth / 2,
+    y: canvas.clientHeight - stationHeight() + 12,
+    size: Math.min(140, canvas.clientWidth * 0.22),
+    t: 0,
+    life: 0.8,
+    good: true,
+  });
+  tone(523, 0.09, "square", 0.045);
+  tone(659, 0.09, "square", 0.045, 0.08);
+  tone(784, 0.16, "square", 0.05, 0.17);
 }
 
 function gameOver() {
@@ -404,6 +466,7 @@ function drawStation(width, height) {
   for (let x = 18; x < width; x += 96) {
     pixelRect(x, baseY + h * 0.76, 42, 9);
   }
+  drawStationDamage(width, baseY, h);
   ctx.fillStyle = "#70ff6b";
   ctx.fillRect(0, baseY - 8, width * Math.max(0, state.shield / 100), 5);
   ctx.fillStyle = "#14351f";
@@ -411,6 +474,20 @@ function drawStation(width, height) {
   for (const hit of state.stationHits) {
     ctx.fillStyle = hit.t % 0.14 < 0.07 ? "#ff315f" : "#ffe45e";
     pixelRect(hit.x - 24, baseY + h * 0.42, 48, 36);
+  }
+}
+
+function drawStationDamage(width, baseY, h) {
+  const segmentWidth = Math.max(42, width / 10);
+  for (const damage of state.stationDamage) {
+    const x = Math.min(width - 34, Math.max(6, damage.index * segmentWidth + segmentWidth * 0.18));
+    const crackHeight = 16 + damage.level * 10;
+    ctx.fillStyle = "#05020f";
+    pixelRect(x, baseY + h * 0.5, 12 + damage.level * 7, crackHeight);
+    pixelRect(x + 16, baseY + h * 0.62, 9 + damage.level * 5, 10 + damage.level * 6);
+    ctx.fillStyle = damage.level >= 3 ? "#ff315f" : "#ff9b3d";
+    pixelRect(x + 4, baseY + h * 0.5 + 4, 6, 6);
+    if (damage.level > 1) pixelRect(x + 22, baseY + h * 0.65, 7, 7);
   }
 }
 
@@ -444,10 +521,12 @@ function drawDrone(drone) {
   ctx.fillStyle = "#ff315f";
   pixelRect(-s * 0.16, -s * 0.42, s * 0.32, s * 0.16);
   ctx.fillStyle = "#fff6d6";
-  ctx.font = `900 ${Math.max(17, s * 0.26)}px "Courier New", monospace`;
+  const label = `${drone.fact.a}x${drone.fact.b}`;
+  const labelSize = label.length >= 5 ? s * 0.2 : s * 0.26;
+  ctx.font = `900 ${Math.max(13, labelSize)}px "Courier New", monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(`${drone.fact.a}x${drone.fact.b}`, 0, -s * 0.06);
+  ctx.fillText(label, 0, -s * 0.06);
   ctx.restore();
 }
 
