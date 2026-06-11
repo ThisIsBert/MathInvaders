@@ -5,7 +5,8 @@ const ctx = canvas.getContext("2d");
 const scoreEl = document.querySelector("#score");
 const levelEl = document.querySelector("#level");
 const shieldEl = document.querySelector("#shield");
-const answerEl = document.querySelector("#answerOutput");
+const streakEl = document.querySelector("#streak");
+const fireButton = document.querySelector("#fireButton");
 const startOverlay = document.querySelector("#startOverlay");
 const pauseOverlay = document.querySelector("#pauseOverlay");
 const gameOverOverlay = document.querySelector("#gameOverOverlay");
@@ -19,6 +20,7 @@ const state = {
   score: 0,
   level: 1,
   shield: 100,
+  streak: 0,
   answer: "",
   spawnTimer: 0,
   missionTime: 0,
@@ -29,6 +31,7 @@ const state = {
   stars: [],
   stationHits: [],
   facts: [],
+  audio: null,
 };
 
 for (let a = 1; a <= 10; a += 1) {
@@ -61,14 +64,17 @@ function seedStars(width, height) {
 }
 
 function resetGame() {
+  ensureAudio();
+  sound("start");
   state.running = true;
   state.paused = false;
   state.lastTime = performance.now();
   state.score = 0;
   state.level = 1;
   state.shield = 100;
+  state.streak = 0;
   state.answer = "";
-  state.spawnTimer = 1.6;
+  state.spawnTimer = 5.2;
   state.missionTime = 0;
   state.waveTime = 0;
   state.drones = [];
@@ -95,8 +101,54 @@ function updateHud() {
   scoreEl.textContent = state.score.toString();
   levelEl.textContent = state.level.toString();
   shieldEl.textContent = `${Math.max(0, Math.ceil(state.shield))}%`;
-  answerEl.textContent = state.answer || "-";
+  streakEl.textContent = state.streak.toString();
+  fireButton.textContent = state.answer ? `Feuer ${state.answer}` : "Feuer";
   pauseButton.setAttribute("aria-label", state.paused ? "Weiter" : "Pause");
+}
+
+function ensureAudio() {
+  if (state.audio) return state.audio;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return null;
+  state.audio = new AudioContext();
+  return state.audio;
+}
+
+function tone(frequency, duration, type = "square", gain = 0.045, delay = 0) {
+  const audio = ensureAudio();
+  if (!audio) return;
+  if (audio.state === "suspended") audio.resume();
+  const oscillator = audio.createOscillator();
+  const envelope = audio.createGain();
+  const start = audio.currentTime + delay;
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, start);
+  envelope.gain.setValueAtTime(0.0001, start);
+  envelope.gain.exponentialRampToValueAtTime(gain, start + 0.015);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(envelope);
+  envelope.connect(audio.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.02);
+}
+
+function sound(name) {
+  if (name === "start") {
+    tone(196, 0.08);
+    tone(392, 0.09, "square", 0.05, 0.08);
+    tone(784, 0.12, "square", 0.045, 0.17);
+  }
+  if (name === "tap") tone(660, 0.035, "square", 0.025);
+  if (name === "fire") tone(520, 0.055, "sawtooth", 0.04);
+  if (name === "hit") {
+    tone(880, 0.055, "square", 0.05);
+    tone(1320, 0.08, "square", 0.04, 0.055);
+  }
+  if (name === "miss") tone(170, 0.12, "sawtooth", 0.045);
+  if (name === "damage") {
+    tone(90, 0.16, "sawtooth", 0.055);
+    tone(65, 0.2, "square", 0.035, 0.06);
+  }
 }
 
 function weightedFact() {
@@ -120,9 +172,9 @@ function weightedFact() {
 function spawnDrone() {
   const width = canvas.clientWidth;
   const fact = weightedFact();
-  const size = Math.min(86, Math.max(62, width * 0.13));
+  const size = Math.min(76, Math.max(54, width * 0.115));
   const x = Math.random() * (width - size * 1.4) + size * 0.7;
-  const speed = 16 + state.level * 5.5 + Math.random() * 8;
+  const speed = 6 + state.level * 2.6 + Math.random() * 3.5;
   state.drones.push({
     x,
     y: -size,
@@ -149,9 +201,9 @@ function update(dt) {
   state.waveTime += dt;
   state.level = Math.max(1, Math.floor(state.score / 450) + 1);
   state.spawnTimer -= dt;
-  if (state.spawnTimer <= 0) {
+  if (state.spawnTimer <= 0 && state.drones.length < maxActiveDrones()) {
     spawnDrone();
-    state.spawnTimer = Math.max(0.78, 2.95 - state.level * 0.14 - Math.random() * 0.35);
+    state.spawnTimer = nextSpawnDelay();
   }
 
   for (const star of state.stars) {
@@ -166,7 +218,7 @@ function update(dt) {
     drone.y += drone.speed * dt;
     drone.wobble += dt * 2.7;
     drone.x += Math.sin(drone.wobble) * dt * 10;
-    if (drone.y + drone.size * 0.55 >= height - 38) {
+    if (drone.y + drone.size * 0.55 >= height - stationHeight()) {
       damageStation(drone);
       missFact(drone.fact);
       drone.dead = true;
@@ -198,11 +250,29 @@ function update(dt) {
   updateHud();
 }
 
+function maxActiveDrones() {
+  if (state.level < 4) return 1;
+  if (state.level < 7) return 2;
+  if (state.level < 10) return 3;
+  return 4;
+}
+
+function nextSpawnDelay() {
+  if (state.level < 3) return 6.2 + Math.random() * 1.4;
+  if (state.level < 6) return 4.3 + Math.random() * 1.1;
+  return Math.max(1.45, 3.35 - state.level * 0.13 + Math.random() * 0.8);
+}
+
+function stationHeight() {
+  return Math.min(112, Math.max(86, canvas.clientHeight * 0.13));
+}
+
 function fire() {
   if (!state.running || state.paused || !state.answer) return;
+  sound("fire");
   const value = Number(state.answer);
   const cannonX = canvas.clientWidth / 2;
-  const cannonY = canvas.clientHeight - 26;
+  const cannonY = canvas.clientHeight - stationHeight() + 26;
   const target = targetForAnswer(value);
   if (!target) {
     state.answer = "";
@@ -228,7 +298,9 @@ function fire() {
 
   if (!hit) {
     missFact(target.fact);
+    state.streak = 0;
     state.score = Math.max(0, state.score - Math.min(25, Math.abs(delta) * 2));
+    sound("miss");
   }
   state.answer = "";
   updateHud();
@@ -254,8 +326,10 @@ function destroyDrone(drone) {
   drone.dead = true;
   drone.fact.hits += 1;
   drone.fact.streak += 1;
+  state.streak += 1;
   state.score += 100 + state.level * 12 + Math.max(0, Math.floor((canvas.clientHeight - drone.y) / 10));
   state.explosions.push({ x: drone.x, y: drone.y, size: drone.size, t: 0, life: 0.55, good: true });
+  sound("hit");
 }
 
 function missFact(fact) {
@@ -264,10 +338,12 @@ function missFact(fact) {
 }
 
 function damageStation(drone) {
-  const grace = state.missionTime < 7 ? 0.58 : 1;
-  state.shield -= 6 * grace;
+  const grace = state.missionTime < 18 ? 0.45 : 1;
+  state.shield -= 4 * grace;
+  state.streak = 0;
   state.stationHits.push({ x: drone.x, t: 0 });
-  state.explosions.push({ x: drone.x, y: canvas.clientHeight - 34, size: drone.size * 1.25, t: 0, life: 0.7, good: false });
+  state.explosions.push({ x: drone.x, y: canvas.clientHeight - stationHeight() + 20, size: drone.size * 1.25, t: 0, life: 0.7, good: false });
+  sound("damage");
 }
 
 function gameOver() {
@@ -280,57 +356,74 @@ function draw() {
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
   ctx.clearRect(0, 0, width, height);
+  ctx.imageSmoothingEnabled = false;
   drawSpace(width, height);
-  drawStation(width, height);
   for (const drone of state.drones) drawDrone(drone);
   for (const shot of state.shots) drawShot(shot);
   for (const explosion of state.explosions) drawExplosion(explosion);
+  drawStation(width, height);
   drawCannon(width, height);
 }
 
 function drawSpace(width, height) {
-  const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, "#07131f");
-  gradient.addColorStop(0.58, "#0a1722");
-  gradient.addColorStop(1, "#17141b");
-  ctx.fillStyle = gradient;
+  ctx.fillStyle = "#05020f";
   ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#0c0b24";
+  for (let y = 0; y < height; y += 18) {
+    ctx.fillRect(0, y, width, 2);
+  }
+  ctx.fillStyle = "rgba(91, 231, 255, 0.12)";
+  for (let x = 0; x < width; x += 48) {
+    ctx.fillRect(x, 0, 2, height);
+  }
   for (const star of state.stars) {
-    ctx.fillStyle = `rgba(219, 248, 255, ${star.alpha})`;
-    ctx.beginPath();
-    ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = star.alpha > 0.55 ? "#fff6d6" : "#5be7ff";
+    pixelRect(star.x, star.y, star.r * 2 + 1, star.r * 2 + 1);
   }
 }
 
 function drawStation(width, height) {
-  const baseY = height - 44;
-  ctx.fillStyle = "#1c2d38";
-  ctx.fillRect(0, baseY, width, 44);
-  ctx.fillStyle = "#2d4652";
-  for (let x = 0; x < width; x += 36) {
-    ctx.fillRect(x + 5, baseY + 10, 22, 13);
+  const h = stationHeight();
+  const baseY = height - h;
+  ctx.fillStyle = "#0a0717";
+  ctx.fillRect(0, baseY - 6, width, h + 6);
+  ctx.fillStyle = "#34266e";
+  ctx.fillRect(0, baseY + h * 0.58, width, h * 0.42);
+  ctx.fillStyle = "#5be7ff";
+  ctx.fillRect(0, baseY + h * 0.58, width, 4);
+  ctx.fillStyle = "#1d2f68";
+  for (let x = -18; x < width; x += 72) {
+    pixelRect(x, baseY + h * 0.43, 52, h * 0.42);
+    pixelRect(x + 12, baseY + h * 0.27, 28, h * 0.18);
+    ctx.fillStyle = "#70ff6b";
+    pixelRect(x + 18, baseY + h * 0.5, 8, 8);
+    pixelRect(x + 34, baseY + h * 0.58, 8, 8);
+    ctx.fillStyle = "#1d2f68";
   }
-  ctx.fillStyle = `rgba(111, 240, 167, ${0.18 + state.shield / 180})`;
-  ctx.fillRect(0, baseY - 7, width * Math.max(0, state.shield / 100), 4);
+  ctx.fillStyle = "#ff9b3d";
+  for (let x = 18; x < width; x += 96) {
+    pixelRect(x, baseY + h * 0.76, 42, 9);
+  }
+  ctx.fillStyle = "#70ff6b";
+  ctx.fillRect(0, baseY - 8, width * Math.max(0, state.shield / 100), 5);
+  ctx.fillStyle = "#14351f";
+  ctx.fillRect(width * Math.max(0, state.shield / 100), baseY - 8, width, 5);
   for (const hit of state.stationHits) {
-    ctx.fillStyle = `rgba(255, 92, 122, ${1 - hit.t / 1.2})`;
-    ctx.fillRect(hit.x - 22, baseY + 4, 44, 28);
+    ctx.fillStyle = hit.t % 0.14 < 0.07 ? "#ff315f" : "#ffe45e";
+    pixelRect(hit.x - 24, baseY + h * 0.42, 48, 36);
   }
 }
 
 function drawCannon(width, height) {
   const x = width / 2;
-  const y = height - 34;
-  ctx.fillStyle = "#56d8ff";
-  ctx.beginPath();
-  ctx.moveTo(x, y - 32);
-  ctx.lineTo(x - 18, y + 8);
-  ctx.lineTo(x + 18, y + 8);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "#6ff0a7";
-  ctx.fillRect(x - 30, y + 8, 60, 12);
+  const y = height - stationHeight() + 34;
+  ctx.fillStyle = "#70ff6b";
+  pixelRect(x - 12, y - 38, 24, 44);
+  pixelRect(x - 24, y - 18, 48, 24);
+  ctx.fillStyle = "#5be7ff";
+  pixelRect(x - 36, y + 2, 72, 16);
+  ctx.fillStyle = "#fff6d6";
+  pixelRect(x - 5, y - 46, 10, 12);
 }
 
 function drawDrone(drone) {
@@ -338,26 +431,23 @@ function drawDrone(drone) {
   const y = drone.y;
   const s = drone.size;
   ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = "#3f5361";
-  ctx.strokeStyle = "#56d8ff";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, s * 0.55, s * 0.32, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = "#ff5c7a";
-  ctx.beginPath();
-  ctx.arc(0, -s * 0.03, s * 0.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#eaf8ff";
-  ctx.font = `800 ${Math.max(18, s * 0.24)}px system-ui, sans-serif`;
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.fillStyle = "#ff3fa4";
+  pixelRect(-s * 0.5, -s * 0.1, s, s * 0.24);
+  ctx.fillStyle = "#5be7ff";
+  pixelRect(-s * 0.38, -s * 0.28, s * 0.76, s * 0.34);
+  ctx.fillStyle = "#221742";
+  pixelRect(-s * 0.27, -s * 0.18, s * 0.54, s * 0.18);
+  ctx.fillStyle = "#ffe45e";
+  pixelRect(-s * 0.52, s * 0.17, s * 0.18, s * 0.12);
+  pixelRect(s * 0.34, s * 0.17, s * 0.18, s * 0.12);
+  ctx.fillStyle = "#ff315f";
+  pixelRect(-s * 0.16, -s * 0.42, s * 0.32, s * 0.16);
+  ctx.fillStyle = "#fff6d6";
+  ctx.font = `900 ${Math.max(17, s * 0.26)}px "Courier New", monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(`${drone.fact.a}x${drone.fact.b}`, 0, s * 0.02);
-  ctx.fillStyle = "#ffd166";
-  ctx.fillRect(-s * 0.52, s * 0.2, s * 0.2, s * 0.09);
-  ctx.fillRect(s * 0.32, s * 0.2, s * 0.2, s * 0.09);
+  ctx.fillText(`${drone.fact.a}x${drone.fact.b}`, 0, -s * 0.06);
   ctx.restore();
 }
 
@@ -365,16 +455,16 @@ function drawShot(shot) {
   const ease = 1 - Math.pow(1 - shot.t, 3);
   const x = shot.x0 + (shot.x1 - shot.x0) * ease;
   const y = shot.y0 + (shot.y1 - shot.y0) * ease;
-  ctx.strokeStyle = shot.hit ? "#6ff0a7" : "#ffd166";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(shot.x0, shot.y0);
-  ctx.lineTo(x, y);
-  ctx.stroke();
-  ctx.fillStyle = shot.hit ? "#ffffff" : "#ff5c7a";
-  ctx.beginPath();
-  ctx.arc(x, y, 5, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillStyle = shot.hit ? "#70ff6b" : "#ffe45e";
+  const steps = 5;
+  for (let i = 0; i < steps; i += 1) {
+    const p = i / steps;
+    const tx = shot.x0 + (x - shot.x0) * p;
+    const ty = shot.y0 + (y - shot.y0) * p;
+    pixelRect(tx - 3, ty - 3, 6, 6);
+  }
+  ctx.fillStyle = shot.hit ? "#fff6d6" : "#ff315f";
+  pixelRect(x - 5, y - 5, 10, 10);
 }
 
 function drawExplosion(explosion) {
@@ -382,21 +472,23 @@ function drawExplosion(explosion) {
   const radius = explosion.size * (0.25 + p * 0.75);
   ctx.save();
   ctx.globalAlpha = 1 - p;
-  ctx.fillStyle = explosion.good ? "#6ff0a7" : "#ff5c7a";
-  ctx.beginPath();
-  ctx.arc(explosion.x, explosion.y, radius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#ffd166";
-  ctx.beginPath();
-  ctx.arc(explosion.x, explosion.y, radius * 0.48, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillStyle = explosion.good ? "#70ff6b" : "#ff315f";
+  pixelRect(explosion.x - radius, explosion.y - 6, radius * 2, 12);
+  pixelRect(explosion.x - 6, explosion.y - radius, 12, radius * 2);
+  ctx.fillStyle = "#ffe45e";
+  pixelRect(explosion.x - radius * 0.48, explosion.y - radius * 0.48, radius * 0.96, radius * 0.96);
   ctx.restore();
+}
+
+function pixelRect(x, y, width, height) {
+  ctx.fillRect(Math.round(x), Math.round(y), Math.max(1, Math.round(width)), Math.max(1, Math.round(height)));
 }
 
 function addDigit(digit) {
   if (!state.running) resetGame();
   if (state.answer.length < 3) {
     state.answer += digit;
+    sound("tap");
     updateHud();
   }
 }
@@ -408,6 +500,7 @@ document.querySelector(".keypad").addEventListener("click", (event) => {
   if (key) addDigit(key);
   if (button.dataset.action === "clear") {
     state.answer = "";
+    sound("tap");
     updateHud();
   }
   if (button.dataset.action === "fire") fire();
@@ -433,6 +526,7 @@ window.addEventListener("keydown", (event) => {
   if (/^\d$/.test(event.key)) addDigit(event.key);
   if (event.key === "Backspace") {
     state.answer = state.answer.slice(0, -1);
+    sound("tap");
     updateHud();
   }
   if (event.key === "Enter" || event.key === " ") fire();

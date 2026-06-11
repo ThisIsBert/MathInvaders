@@ -14,19 +14,9 @@
   <body>
     <main class="app-shell" aria-label="MathInvaders Spiel">
       <section class="game-panel">
-        <header class="hud" aria-label="Spielwerte">
-          <div>
-            <span class="hud-label">Punkte</span>
-            <strong id="score">0</strong>
-          </div>
-          <div>
-            <span class="hud-label">Level</span>
-            <strong id="level">1</strong>
-          </div>
-          <div>
-            <span class="hud-label">Station</span>
-            <strong id="shield">100%</strong>
-          </div>
+        <header class="topline" aria-label="Mission">
+          <div class="brand-mark" aria-hidden="true">MI</div>
+          <h1>MathInvaders</h1>
           <button class="icon-button" id="pauseButton" type="button" aria-label="Pause">
             <span aria-hidden="true">II</span>
           </button>
@@ -50,10 +40,24 @@
           </div>
         </div>
 
-        <section class="control-deck" aria-label="Antwort eingeben">
-          <div class="answer-display">
-            <span class="hud-label">Eingabe</span>
-            <output id="answerOutput" aria-live="polite">-</output>
+        <section class="control-deck" aria-label="Spielsteuerung">
+          <div class="stats-grid" aria-label="Spielwerte">
+            <div>
+              <span class="hud-label">Punkte</span>
+              <strong id="score">0</strong>
+            </div>
+            <div>
+              <span class="hud-label">Level</span>
+              <strong id="level">1</strong>
+            </div>
+            <div>
+              <span class="hud-label">Station</span>
+              <strong id="shield">100%</strong>
+            </div>
+            <div>
+              <span class="hud-label">Serie</span>
+              <strong id="streak">0</strong>
+            </div>
           </div>
           <div class="keypad">
             <button type="button" data-key="7">7</button>
@@ -67,7 +71,7 @@
             <button type="button" data-key="3">3</button>
             <button class="utility" type="button" data-action="clear">C</button>
             <button type="button" data-key="0">0</button>
-            <button class="fire" type="button" data-action="fire">Feuer</button>
+            <button class="fire" id="fireButton" type="button" data-action="fire">Feuer</button>
           </div>
         </section>
       </section>
