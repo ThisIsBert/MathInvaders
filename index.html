@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#081018">
+    <meta name="description" content="MathInvaders ist ein Arcade-Lernspiel fuer das kleine Einmaleins.">
+    <title>MathInvaders</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="assets/icon-192.svg">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell" aria-label="MathInvaders Spiel">
+      <section class="game-panel">
+        <header class="hud" aria-label="Spielwerte">
+          <div>
+            <span class="hud-label">Punkte</span>
+            <strong id="score">0</strong>
+          </div>
+          <div>
+            <span class="hud-label">Level</span>
+            <strong id="level">1</strong>
+          </div>
+          <div>
+            <span class="hud-label">Station</span>
+            <strong id="shield">100%</strong>
+          </div>
+          <button class="icon-button" id="pauseButton" type="button" aria-label="Pause">
+            <span aria-hidden="true">II</span>
+          </button>
+        </header>
+
+        <div class="arena-wrap">
+          <canvas id="gameCanvas" width="720" height="960" aria-label="Spielfeld"></canvas>
+          <div class="overlay is-visible" id="startOverlay">
+            <h1>MathInvaders</h1>
+            <p>Tippe das Ergebnis ein und feuere, bevor die Drohnen die Raumstation erreichen.</p>
+            <button id="startButton" type="button">Mission starten</button>
+          </div>
+          <div class="overlay" id="pauseOverlay">
+            <h2>Pause</h2>
+            <button id="resumeButton" type="button">Weiter</button>
+          </div>
+          <div class="overlay" id="gameOverOverlay">
+            <h2>Station verloren</h2>
+            <p id="finalScore">0 Punkte</p>
+            <button id="restartButton" type="button">Neu starten</button>
+          </div>
+        </div>
+
+        <section class="control-deck" aria-label="Antwort eingeben">
+          <div class="answer-display">
+            <span class="hud-label">Eingabe</span>
+            <output id="answerOutput" aria-live="polite">-</output>
+          </div>
+          <div class="keypad">
+            <button type="button" data-key="7">7</button>
+            <button type="button" data-key="8">8</button>
+            <button type="button" data-key="9">9</button>
+            <button type="button" data-key="4">4</button>
+            <button type="button" data-key="5">5</button>
+            <button type="button" data-key="6">6</button>
+            <button type="button" data-key="1">1</button>
+            <button type="button" data-key="2">2</button>
+            <button type="button" data-key="3">3</button>
+            <button class="utility" type="button" data-action="clear">C</button>
+            <button type="button" data-key="0">0</button>
+            <button class="fire" type="button" data-action="fire">Feuer</button>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="app.js" defer></script>
+  </body>
+</html>

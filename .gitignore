@@ -13,6 +13,10 @@ desktop.ini
 *.log
 logs/
 
+# Local test artifacts
+.playwright-cli/
+output/
+
 # Environment and secrets
 .env
 .env.*
@@ -31,4 +35,3 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
-
