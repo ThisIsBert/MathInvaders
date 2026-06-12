@@ -17,6 +17,9 @@
         <header class="topline" aria-label="Mission">
           <div class="brand-mark" aria-hidden="true">MI</div>
           <h1>MathInvaders</h1>
+          <button class="icon-button abort-button" id="abortButton" type="button" aria-label="Spiel abbrechen" title="Spiel abbrechen">
+            <span aria-hidden="true">X</span>
+          </button>
           <button class="icon-button" id="pauseButton" type="button" aria-label="Pause">
             <span aria-hidden="true">II</span>
           </button>
@@ -34,7 +37,7 @@
             <button id="resumeButton" type="button">Weiter</button>
           </div>
           <div class="overlay" id="gameOverOverlay">
-            <h2>Station verloren</h2>
+            <h2 id="gameOverTitle">Station verloren</h2>
             <p id="finalScore">0 Punkte</p>
             <button id="restartButton" type="button">Neu starten</button>
           </div>

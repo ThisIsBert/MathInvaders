@@ -10,8 +10,10 @@ const fireButton = document.querySelector("#fireButton");
 const startOverlay = document.querySelector("#startOverlay");
 const pauseOverlay = document.querySelector("#pauseOverlay");
 const gameOverOverlay = document.querySelector("#gameOverOverlay");
+const gameOverTitleEl = document.querySelector("#gameOverTitle");
 const finalScoreEl = document.querySelector("#finalScore");
 const pauseButton = document.querySelector("#pauseButton");
+const abortButton = document.querySelector("#abortButton");
 
 const state = {
   running: false,
@@ -31,8 +33,11 @@ const state = {
   stars: [],
   stationHits: [],
   stationDamage: [],
+  bonusTexts: [],
   facts: [],
   audio: null,
+  audioBuffers: new Map(),
+  audioPrimed: false,
 };
 
 for (let a = 1; a <= 10; a += 1) {
@@ -66,6 +71,7 @@ function seedStars(width, height) {
 
 function resetGame() {
   ensureAudio();
+  primeAudio();
   sound("start");
   state.running = true;
   state.paused = false;
@@ -83,12 +89,14 @@ function resetGame() {
   state.explosions = [];
   state.stationHits = [];
   state.stationDamage = [];
+  state.bonusTexts = [];
   state.facts.forEach((fact) => {
     fact.misses = 0;
     fact.hits = 0;
     fact.streak = 0;
   });
   updateHud();
+  gameOverTitleEl.textContent = "Station verloren";
   setOverlay(startOverlay, false);
   setOverlay(pauseOverlay, false);
   setOverlay(gameOverOverlay, false);
@@ -104,7 +112,7 @@ function updateHud() {
   levelEl.textContent = state.level.toString();
   shieldEl.textContent = `${Math.max(0, Math.ceil(state.shield))}%`;
   streakEl.textContent = state.streak.toString();
-  fireButton.textContent = state.answer ? `Feuer ${state.answer}` : "Feuer";
+  fireButton.textContent = "Feuer";
   pauseButton.setAttribute("aria-label", state.paused ? "Weiter" : "Pause");
 }
 
@@ -116,10 +124,77 @@ function ensureAudio() {
   return state.audio;
 }
 
+function resumeAudio() {
+  const audio = ensureAudio();
+  if (!audio) return null;
+  requestAudioResume(audio);
+  return audio;
+}
+
+function requestAudioResume(audio) {
+  if (audio.state !== "suspended") return;
+  const resumePromise = audio.resume();
+  if (resumePromise && resumePromise.catch) resumePromise.catch(() => {});
+}
+
+function waveValue(type, phase) {
+  if (type === "sawtooth") return 2 * (phase / (Math.PI * 2) - Math.floor(phase / (Math.PI * 2) + 0.5));
+  if (type === "sine") return Math.sin(phase);
+  return Math.sin(phase) >= 0 ? 1 : -1;
+}
+
+function toneBuffer(frequency, duration, type = "square", gain = 0.045) {
+  const audio = ensureAudio();
+  if (!audio) return null;
+  const key = `${frequency}:${duration}:${type}:${gain}`;
+  const cached = state.audioBuffers.get(key);
+  if (cached) return cached;
+  const length = Math.max(1, Math.floor(audio.sampleRate * duration));
+  const buffer = audio.createBuffer(1, length, audio.sampleRate);
+  const data = buffer.getChannelData(0);
+  const attack = Math.max(1, Math.floor(audio.sampleRate * Math.min(0.004, duration * 0.3)));
+  const release = Math.max(1, Math.floor(audio.sampleRate * Math.min(0.012, duration * 0.45)));
+  for (let i = 0; i < length; i += 1) {
+    const phase = (i / audio.sampleRate) * frequency * Math.PI * 2;
+    const fadeIn = Math.min(1, i / attack);
+    const fadeOut = Math.min(1, (length - i) / release);
+    data[i] = waveValue(type, phase) * gain * Math.min(fadeIn, fadeOut);
+  }
+  state.audioBuffers.set(key, buffer);
+  return buffer;
+}
+
+function playToneBuffer(frequency, duration, type = "square", gain = 0.045, delay = 0) {
+  const audio = resumeAudio();
+  if (!audio) return;
+  const buffer = toneBuffer(frequency, duration, type, gain);
+  if (!buffer) return;
+  const source = audio.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audio.destination);
+  source.start(audio.currentTime + delay);
+}
+
+function primeAudio() {
+  const audio = resumeAudio();
+  if (!audio || state.audioPrimed) return;
+  toneBuffer(660, 0.032, "square", 0.026);
+  toneBuffer(520, 0.052, "sawtooth", 0.04);
+  toneBuffer(784, 0.08, "square", 0.04);
+  const buffer = toneBuffer(20, 0.012, "sine", 0.00001);
+  if (buffer) {
+    const source = audio.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audio.destination);
+    source.start(audio.currentTime);
+  }
+  state.audioPrimed = true;
+}
+
 function tone(frequency, duration, type = "square", gain = 0.045, delay = 0) {
   const audio = ensureAudio();
   if (!audio) return;
-  if (audio.state === "suspended") audio.resume();
+  requestAudioResume(audio);
   const oscillator = audio.createOscillator();
   const envelope = audio.createGain();
   const start = audio.currentTime + delay;
@@ -137,7 +212,7 @@ function tone(frequency, duration, type = "square", gain = 0.045, delay = 0) {
 function noise(duration, gain = 0.055, delay = 0) {
   const audio = ensureAudio();
   if (!audio) return;
-  if (audio.state === "suspended") audio.resume();
+  requestAudioResume(audio);
   const sampleRate = audio.sampleRate;
   const buffer = audio.createBuffer(1, Math.max(1, sampleRate * duration), sampleRate);
   const data = buffer.getChannelData(0);
@@ -161,8 +236,8 @@ function sound(name) {
     tone(392, 0.09, "square", 0.05, 0.08);
     tone(784, 0.12, "square", 0.045, 0.17);
   }
-  if (name === "tap") tone(660, 0.035, "square", 0.025);
-  if (name === "fire") tone(520, 0.055, "sawtooth", 0.04);
+  if (name === "tap") playToneBuffer(660, 0.032, "square", 0.026);
+  if (name === "fire") playToneBuffer(520, 0.052, "sawtooth", 0.04);
   if (name === "hit") {
     noise(0.22, 0.08);
     tone(96, 0.14, "sawtooth", 0.065);
@@ -173,6 +248,12 @@ function sound(name) {
   if (name === "damage") {
     tone(90, 0.16, "sawtooth", 0.055);
     tone(65, 0.2, "square", 0.035, 0.06);
+  }
+  if (name === "bonus") {
+    playToneBuffer(523, 0.075, "square", 0.04);
+    playToneBuffer(659, 0.075, "square", 0.04, 0.07);
+    playToneBuffer(784, 0.085, "square", 0.045, 0.14);
+    playToneBuffer(1046, 0.12, "square", 0.04, 0.22);
   }
 }
 
@@ -199,7 +280,14 @@ function spawnDrone() {
   const fact = weightedFact();
   const size = Math.min(76, Math.max(54, width * 0.115));
   const x = Math.random() * (width - size * 1.4) + size * 0.7;
-  const speed = 6 + state.level * 2.6 + Math.random() * 3.5;
+  const baseSpeed = 6 + state.level * 2.6 + Math.random() * 3.5;
+  const activeCount = state.drones.length;
+  let speed = baseSpeed;
+  if (activeCount > 0) {
+    const slowestVisible = Math.min(...state.drones.map((drone) => drone.speed));
+    const followupScale = Math.max(0.5, 0.76 - activeCount * 0.08);
+    speed = Math.min(baseSpeed, slowestVisible * followupScale);
+  }
   state.drones.push({
     x,
     y: -size,
@@ -266,6 +354,11 @@ function update(dt) {
   state.drones = state.drones.filter((drone) => !drone.dead);
   state.shots = state.shots.filter((shot) => !shot.dead);
   state.explosions = state.explosions.filter((explosion) => explosion.t < explosion.life);
+  state.bonusTexts = state.bonusTexts.filter((bonus) => {
+    bonus.t += dt;
+    bonus.y -= dt * 42;
+    return bonus.t < bonus.life;
+  });
   state.stationHits = state.stationHits.filter((hit) => {
     hit.t += dt;
     return hit.t < 1.2;
@@ -276,9 +369,9 @@ function update(dt) {
 }
 
 function maxActiveDrones() {
-  if (state.level < 4) return 1;
-  if (state.level < 7) return 2;
-  if (state.level < 10) return 3;
+  if (state.level < 7) return 1;
+  if (state.level < 11) return 2;
+  if (state.level < 15) return 3;
   return 4;
 }
 
@@ -354,7 +447,7 @@ function destroyDrone(drone) {
   state.streak += 1;
   state.score += 100 + state.level * 12 + Math.max(0, Math.floor((canvas.clientHeight - drone.y) / 10));
   state.explosions.push({ x: drone.x, y: drone.y, size: drone.size, t: 0, life: 0.55, good: true });
-  if (state.streak % 10 === 0) repairStation();
+  if (state.streak % 5 === 0) repairStation();
   sound("hit");
 }
 
@@ -386,7 +479,9 @@ function addStationDamage(x) {
 }
 
 function repairStation() {
+  const shieldBefore = state.shield;
   state.shield = Math.min(100, state.shield + 14);
+  const restored = Math.max(0, Math.ceil(state.shield - shieldBefore));
   state.score += 250;
   state.stationDamage
     .sort((a, b) => b.level - a.level)
@@ -403,15 +498,38 @@ function repairStation() {
     life: 0.8,
     good: true,
   });
-  tone(523, 0.09, "square", 0.045);
-  tone(659, 0.09, "square", 0.045, 0.08);
-  tone(784, 0.16, "square", 0.05, 0.17);
+  addBonusText(restored || 14);
+  sound("bonus");
+}
+
+function addBonusText(restored) {
+  state.bonusTexts.push({
+    x: canvas.clientWidth / 2,
+    y: canvas.clientHeight - stationHeight() - 18,
+    value: restored,
+    t: 0,
+    life: 1.15,
+  });
+}
+
+function finishGame(title) {
+  state.running = false;
+  state.paused = false;
+  state.answer = "";
+  gameOverTitleEl.textContent = title;
+  finalScoreEl.textContent = `${state.score} Punkte`;
+  setOverlay(pauseOverlay, false);
+  setOverlay(gameOverOverlay, true);
+  updateHud();
 }
 
 function gameOver() {
-  state.running = false;
-  finalScoreEl.textContent = `${state.score} Punkte`;
-  setOverlay(gameOverOverlay, true);
+  finishGame("Station verloren");
+}
+
+function abortGame() {
+  if (!state.running) return;
+  finishGame("Mission beendet");
 }
 
 function draw() {
@@ -424,6 +542,7 @@ function draw() {
   for (const shot of state.shots) drawShot(shot);
   for (const explosion of state.explosions) drawExplosion(explosion);
   drawStation(width, height);
+  for (const bonus of state.bonusTexts) drawBonusText(bonus);
   drawCannon(width, height);
 }
 
@@ -501,6 +620,34 @@ function drawCannon(width, height) {
   pixelRect(x - 36, y + 2, 72, 16);
   ctx.fillStyle = "#fff6d6";
   pixelRect(x - 5, y - 46, 10, 12);
+  if (state.answer) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `900 ${Math.min(34, Math.max(22, width * 0.07))}px "Courier New", monospace`;
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "#05020f";
+    ctx.strokeText(state.answer, x, y - 62);
+    ctx.fillStyle = "#ffe45e";
+    ctx.fillText(state.answer, x, y - 62);
+    ctx.restore();
+  }
+}
+
+function drawBonusText(bonus) {
+  const progress = bonus.t / bonus.life;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - progress);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `900 ${Math.min(26, Math.max(18, canvas.clientWidth * 0.055))}px "Courier New", monospace`;
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "#05020f";
+  const label = `Bonus +${bonus.value} %`;
+  ctx.strokeText(label, bonus.x, bonus.y);
+  ctx.fillStyle = "#70ff6b";
+  ctx.fillText(label, bonus.x, bonus.y);
+  ctx.restore();
 }
 
 function drawDrone(drone) {
@@ -574,6 +721,7 @@ function addDigit(digit) {
 
 function handleKeypadInput(event) {
   if (event.type === "pointerdown") event.preventDefault();
+  primeAudio();
   const button = event.target.closest("button");
   if (!button) return;
   const key = button.dataset.key;
@@ -593,6 +741,9 @@ if (window.PointerEvent) {
   keypad.addEventListener("click", handleKeypadInput);
 }
 
+document.addEventListener("pointerdown", primeAudio, { capture: true, passive: true });
+document.addEventListener("touchstart", primeAudio, { capture: true, passive: true });
+document.addEventListener("keydown", primeAudio, { capture: true });
 document.querySelector("#startButton").addEventListener("click", resetGame);
 document.querySelector("#restartButton").addEventListener("click", resetGame);
 document.querySelector("#resumeButton").addEventListener("click", () => {
@@ -609,12 +760,14 @@ pauseButton.addEventListener("click", () => {
   updateHud();
 });
 
+abortButton.addEventListener("click", abortGame);
+
 window.addEventListener("keydown", (event) => {
   if (/^\d$/.test(event.key)) addDigit(event.key);
   if (event.key === "Backspace") {
     state.answer = state.answer.slice(0, -1);
-    sound("tap");
     updateHud();
+    sound("tap");
   }
   if (event.key === "Enter" || event.key === " ") fire();
 });
