@@ -567,23 +567,31 @@ function addDigit(digit) {
   if (!state.running) resetGame();
   if (state.answer.length < 3) {
     state.answer += digit;
-    sound("tap");
     updateHud();
+    sound("tap");
   }
 }
 
-document.querySelector(".keypad").addEventListener("click", (event) => {
+function handleKeypadInput(event) {
+  if (event.type === "pointerdown") event.preventDefault();
   const button = event.target.closest("button");
   if (!button) return;
   const key = button.dataset.key;
   if (key) addDigit(key);
   if (button.dataset.action === "clear") {
     state.answer = "";
-    sound("tap");
     updateHud();
+    sound("tap");
   }
   if (button.dataset.action === "fire") fire();
-});
+}
+
+const keypad = document.querySelector(".keypad");
+if (window.PointerEvent) {
+  keypad.addEventListener("pointerdown", handleKeypadInput);
+} else {
+  keypad.addEventListener("click", handleKeypadInput);
+}
 
 document.querySelector("#startButton").addEventListener("click", resetGame);
 document.querySelector("#restartButton").addEventListener("click", resetGame);
@@ -617,7 +625,19 @@ draw();
 updateHud();
 
 if ("serviceWorker" in navigator) {
+  const hadServiceWorkerController = Boolean(navigator.serviceWorker.controller);
+  let reloadingForServiceWorker = false;
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadServiceWorkerController || reloadingForServiceWorker) return;
+    reloadingForServiceWorker = true;
+    window.location.reload();
+  });
+
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js");
+    navigator.serviceWorker.register("./sw.js").then((registration) => {
+      registration.update();
+      setInterval(() => registration.update(), 30 * 60 * 1000);
+    });
   });
 }

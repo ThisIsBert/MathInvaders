@@ -1,4 +1,4 @@
-const CACHE_NAME = "mathinvaders-v6";
+const CACHE_NAME = "mathinvaders-v7";
 const ASSETS = [
   "./",
   "./index.html",
@@ -26,15 +26,28 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+function cacheResponse(request, response) {
+  if (response && response.status === 200) {
+    const copy = response.clone();
+    caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+  }
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => cacheResponse("./", response))
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("./index.html")))
+    );
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then((cached) =>
-      cached || fetch(event.request).then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      })
-    )
+    fetch(event.request)
+      .then((response) => cacheResponse(event.request, response))
+      .catch(() => caches.match(event.request))
   );
 });
