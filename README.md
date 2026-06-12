@@ -1,5 +1,7 @@
 # MathInvaders
 
+Ein Lernspiel fuer das kleine Einmaleins.
+
 MathInvaders is a static progressive web app for Android tablets in portrait mode.
 It turns multiplication practice into a Space-Invaders-style arcade game.
 
