@@ -1,4 +1,4 @@
-const CACHE_NAME = "mathinvaders-v9";
+const CACHE_NAME = "mathinvaders-v10";
 const ASSETS = [
   "./",
   "./index.html",
@@ -7,7 +7,8 @@ const ASSETS = [
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/icon-192.svg",
-  "./assets/icon-512.svg"
+  "./assets/icon-512.svg",
+  "./assets/moodmode-game-8-bit-on-278083.mp3"
 ];
 
 self.addEventListener("install", (event) => {

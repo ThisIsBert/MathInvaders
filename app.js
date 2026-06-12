@@ -14,8 +14,11 @@ const gameOverTitleEl = document.querySelector("#gameOverTitle");
 const finalScoreEl = document.querySelector("#finalScore");
 const pauseButton = document.querySelector("#pauseButton");
 const abortButton = document.querySelector("#abortButton");
+const menuMusic = document.querySelector("#menuMusic");
 const TEAM_START_LEVELS = [1, 7, 14];
-const TEAM_SPEED_RAMP_LEVELS = 7;
+const TEAM_SPEED_RAMP_LEVELS = 12;
+const TEAM_SPEED_START = 8.6;
+const TEAM_SPEED_STEP = 3.2;
 const SCORE_BONUS_STEP = 1000;
 
 const state = {
@@ -42,6 +45,7 @@ const state = {
   audio: null,
   audioBuffers: new Map(),
   audioPrimed: false,
+  menuMusicWanted: false,
 };
 
 for (let a = 1; a <= 10; a += 1) {
@@ -74,6 +78,7 @@ function seedStars(width, height) {
 }
 
 function resetGame() {
+  stopMenuMusic();
   ensureAudio();
   primeAudio();
   sound("start");
@@ -110,6 +115,27 @@ function resetGame() {
 
 function setOverlay(element, visible) {
   element.classList.toggle("is-visible", visible);
+}
+
+function playMenuMusic() {
+  if (!menuMusic) return;
+  state.menuMusicWanted = true;
+  menuMusic.volume = 0.32;
+  const playPromise = menuMusic.play();
+  if (playPromise && playPromise.then) {
+    playPromise
+      .then(() => {
+        if (!state.menuMusicWanted) stopMenuMusic();
+      })
+      .catch(() => {});
+  }
+}
+
+function stopMenuMusic() {
+  state.menuMusicWanted = false;
+  if (!menuMusic) return;
+  menuMusic.pause();
+  menuMusic.currentTime = 0;
 }
 
 function updateHud() {
@@ -307,7 +333,7 @@ function teamForNextDrone() {
 function speedForTeam(team) {
   const teamLevel = Math.max(1, state.level - team.startLevel + 1);
   const rampLevel = Math.min(teamLevel, TEAM_SPEED_RAMP_LEVELS);
-  return 6 + rampLevel * 2.6 + Math.random() * 3.5;
+  return TEAM_SPEED_START + (rampLevel - 1) * TEAM_SPEED_STEP + Math.random() * 3.5;
 }
 
 function spawnDrone() {
@@ -571,6 +597,7 @@ function finishGame(title) {
   finalScoreEl.textContent = `${state.score} Punkte`;
   setOverlay(pauseOverlay, false);
   setOverlay(gameOverOverlay, true);
+  playMenuMusic();
   updateHud();
 }
 
@@ -806,6 +833,9 @@ if (window.PointerEvent) {
 document.addEventListener("pointerdown", primeAudio, { capture: true, passive: true });
 document.addEventListener("touchstart", primeAudio, { capture: true, passive: true });
 document.addEventListener("keydown", primeAudio, { capture: true });
+document.addEventListener("pointerdown", () => {
+  if (!state.running && !state.paused) playMenuMusic();
+}, { capture: true, passive: true });
 document.querySelector("#startButton").addEventListener("click", resetGame);
 document.querySelector("#restartButton").addEventListener("click", resetGame);
 document.querySelector("#resumeButton").addEventListener("click", () => {
@@ -838,6 +868,7 @@ window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 draw();
 updateHud();
+playMenuMusic();
 
 if ("serviceWorker" in navigator) {
   const hadServiceWorkerController = Boolean(navigator.serviceWorker.controller);
