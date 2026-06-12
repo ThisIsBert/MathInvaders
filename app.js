@@ -14,6 +14,9 @@ const gameOverTitleEl = document.querySelector("#gameOverTitle");
 const finalScoreEl = document.querySelector("#finalScore");
 const pauseButton = document.querySelector("#pauseButton");
 const abortButton = document.querySelector("#abortButton");
+const TEAM_START_LEVELS = [1, 7, 14];
+const TEAM_SPEED_RAMP_LEVELS = 7;
+const SCORE_BONUS_STEP = 1000;
 
 const state = {
   running: false,
@@ -27,6 +30,7 @@ const state = {
   spawnTimer: 0,
   missionTime: 0,
   waveTime: 0,
+  nextScoreBonus: SCORE_BONUS_STEP,
   drones: [],
   shots: [],
   explosions: [],
@@ -84,6 +88,7 @@ function resetGame() {
   state.spawnTimer = 5.2;
   state.missionTime = 0;
   state.waveTime = 0;
+  state.nextScoreBonus = SCORE_BONUS_STEP;
   state.drones = [];
   state.shots = [];
   state.explosions = [];
@@ -181,6 +186,8 @@ function primeAudio() {
   toneBuffer(660, 0.032, "square", 0.026);
   toneBuffer(520, 0.052, "sawtooth", 0.04);
   toneBuffer(784, 0.08, "square", 0.04);
+  toneBuffer(392, 0.08, "square", 0.045);
+  toneBuffer(1175, 0.16, "square", 0.045);
   const buffer = toneBuffer(20, 0.012, "sine", 0.00001);
   if (buffer) {
     const source = audio.createBufferSource();
@@ -255,6 +262,12 @@ function sound(name) {
     playToneBuffer(784, 0.085, "square", 0.045, 0.14);
     playToneBuffer(1046, 0.12, "square", 0.04, 0.22);
   }
+  if (name === "scoreBonus") {
+    playToneBuffer(392, 0.08, "square", 0.045);
+    playToneBuffer(587, 0.075, "square", 0.045, 0.07);
+    playToneBuffer(880, 0.09, "square", 0.05, 0.14);
+    playToneBuffer(1175, 0.16, "square", 0.045, 0.23);
+  }
 }
 
 function weightedFact() {
@@ -275,24 +288,41 @@ function weightedFact() {
   return state.facts[state.facts.length - 1];
 }
 
+function activeTeams() {
+  return TEAM_START_LEVELS.filter((startLevel) => state.level >= startLevel).map((startLevel, index) => ({
+    id: index + 1,
+    startLevel,
+  }));
+}
+
+function teamForNextDrone() {
+  const teams = activeTeams();
+  return teams.reduce((best, team) => {
+    const bestCount = state.drones.filter((drone) => drone.team === best.id).length;
+    const teamCount = state.drones.filter((drone) => drone.team === team.id).length;
+    return teamCount < bestCount ? team : best;
+  }, teams[0]);
+}
+
+function speedForTeam(team) {
+  const teamLevel = Math.max(1, state.level - team.startLevel + 1);
+  const rampLevel = Math.min(teamLevel, TEAM_SPEED_RAMP_LEVELS);
+  return 6 + rampLevel * 2.6 + Math.random() * 3.5;
+}
+
 function spawnDrone() {
   const width = canvas.clientWidth;
   const fact = weightedFact();
+  const team = teamForNextDrone();
   const size = Math.min(76, Math.max(54, width * 0.115));
   const x = Math.random() * (width - size * 1.4) + size * 0.7;
-  const baseSpeed = 6 + state.level * 2.6 + Math.random() * 3.5;
-  const activeCount = state.drones.length;
-  let speed = baseSpeed;
-  if (activeCount > 0) {
-    const slowestVisible = Math.min(...state.drones.map((drone) => drone.speed));
-    const followupScale = Math.max(0.5, 0.76 - activeCount * 0.08);
-    speed = Math.min(baseSpeed, slowestVisible * followupScale);
-  }
+  const speed = speedForTeam(team);
   state.drones.push({
     x,
     y: -size,
     size,
     speed,
+    team: team.id,
     fact,
     wobble: Math.random() * Math.PI * 2,
     answer: fact.a * fact.b,
@@ -369,10 +399,7 @@ function update(dt) {
 }
 
 function maxActiveDrones() {
-  if (state.level < 7) return 1;
-  if (state.level < 11) return 2;
-  if (state.level < 15) return 3;
-  return 4;
+  return activeTeams().length;
 }
 
 function nextSpawnDelay() {
@@ -445,7 +472,9 @@ function destroyDrone(drone) {
   drone.fact.hits += 1;
   drone.fact.streak += 1;
   state.streak += 1;
+  const scoreBefore = state.score;
   state.score += 100 + state.level * 12 + Math.max(0, Math.floor((canvas.clientHeight - drone.y) / 10));
+  applyScoreBonuses(scoreBefore);
   state.explosions.push({ x: drone.x, y: drone.y, size: drone.size, t: 0, life: 0.55, good: true });
   if (state.streak % 5 === 0) repairStation();
   sound("hit");
@@ -482,7 +511,9 @@ function repairStation() {
   const shieldBefore = state.shield;
   state.shield = Math.min(100, state.shield + 14);
   const restored = Math.max(0, Math.ceil(state.shield - shieldBefore));
+  const scoreBefore = state.score;
   state.score += 250;
+  applyScoreBonuses(scoreBefore);
   state.stationDamage
     .sort((a, b) => b.level - a.level)
     .slice(0, 3)
@@ -500,6 +531,26 @@ function repairStation() {
   });
   addBonusText(restored || 14);
   sound("bonus");
+}
+
+function applyScoreBonuses(scoreBefore) {
+  while (scoreBefore < state.nextScoreBonus && state.score >= state.nextScoreBonus) {
+    applyScoreBonus();
+    state.nextScoreBonus += SCORE_BONUS_STEP;
+  }
+}
+
+function applyScoreBonus() {
+  state.shield = Math.min(100, state.shield + 10);
+  state.bonusTexts.push({
+    x: canvas.clientWidth / 2,
+    y: canvas.clientHeight * 0.28,
+    value: "1k-Bonus",
+    t: 0,
+    life: 1.25,
+    kind: "score",
+  });
+  sound("scoreBonus");
 }
 
 function addBonusText(restored) {
@@ -637,16 +688,27 @@ function drawCannon(width, height) {
 function drawBonusText(bonus) {
   const progress = bonus.t / bonus.life;
   ctx.save();
-  ctx.globalAlpha = Math.max(0, 1 - progress);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `900 ${Math.min(26, Math.max(18, canvas.clientWidth * 0.055))}px "Courier New", monospace`;
-  ctx.lineWidth = 5;
-  ctx.strokeStyle = "#05020f";
-  const label = `Bonus +${bonus.value} %`;
-  ctx.strokeText(label, bonus.x, bonus.y);
-  ctx.fillStyle = "#70ff6b";
-  ctx.fillText(label, bonus.x, bonus.y);
+  if (bonus.kind === "score") {
+    const pulse = Math.sin(progress * Math.PI * 8) > 0 ? 1 : 0.55;
+    ctx.globalAlpha = Math.max(0, 1 - progress * 0.45) * pulse;
+    ctx.font = `900 ${Math.min(54, Math.max(34, canvas.clientWidth * 0.13))}px "Courier New", monospace`;
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = "#05020f";
+    ctx.strokeText(bonus.value, bonus.x, bonus.y);
+    ctx.fillStyle = "#ffe45e";
+    ctx.fillText(bonus.value, bonus.x, bonus.y);
+  } else {
+    ctx.globalAlpha = Math.max(0, 1 - progress);
+    ctx.font = `900 ${Math.min(26, Math.max(18, canvas.clientWidth * 0.055))}px "Courier New", monospace`;
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "#05020f";
+    const label = `Bonus +${bonus.value} %`;
+    ctx.strokeText(label, bonus.x, bonus.y);
+    ctx.fillStyle = "#70ff6b";
+    ctx.fillText(label, bonus.x, bonus.y);
+  }
   ctx.restore();
 }
 
